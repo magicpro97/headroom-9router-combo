@@ -25,7 +25,15 @@ set -a
 set +a
 
 # Quick reachability check on 9router
-ROUTER="${NINE_ROUTER_BASE:-http://127.0.0.1:20128}"
+# On macOS, the headroom host process must use 127.0.0.1 (host.docker.internal
+# only resolves inside docker). For docker compose, .env's host.docker.internal
+# is correct. Override here for the host-process path.
+OS="$(uname -s)"
+if [ "$OS" = "Darwin" ] && [ "$STRATEGY" = "host" ]; then
+  ROUTER="http://127.0.0.1:20128"
+else
+  ROUTER="${NINE_ROUTER_BASE:-http://127.0.0.1:20128}"
+fi
 if ! curl -sf --max-time 5 "${ROUTER}/api/health" > /dev/null 2>&1; then
   echo "9router is not reachable at $ROUTER"
   echo "Start 9router first (host process), then retry."
@@ -51,9 +59,9 @@ start_host_process() {
   fi
 
   headroom proxy --host 0.0.0.0 --port 8787 --workers 1 --no-optimize --no-cache \
-    --openai-api-url "${NINE_ROUTER_BASE}/v1" \
-    --anthropic-api-url "${NINE_ROUTER_BASE}/v1" \
-    --cloudcode-api-url "${NINE_ROUTER_BASE}/v1" \
+    --openai-api-url "${ROUTER}/v1" \
+    --anthropic-api-url "${ROUTER}/v1" \
+    --cloudcode-api-url "${ROUTER}/v1" \
     > /tmp/headroom-combo.log 2>&1 &
   echo "Started headroom (pid $!), log: /tmp/headroom-combo.log"
 }
