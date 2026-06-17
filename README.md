@@ -50,9 +50,27 @@ Both run on `localhost`. The tool only sees one URL: `http://localhost:8787`.
 **macOS** (recommended — host process):
 
 ```bash
-pip3 install --user 'headroom-ai[proxy]'
-export PATH="$HOME/Library/Python/3.12/bin:$PATH"
+# Passthrough (no extra LLM calls, no token savings, free)
+~/work/headroom-9router-combo/scripts/start.sh
+
+# Compression (litellm + 9router, opportunistic token savings on tool outputs)
+COMPRESSION_MODE=learn ~/work/headroom-9router-combo/scripts/start.sh
+```
+
+Manual equivalent:
+
+```bash
+# Passthrough
 headroom proxy --host 0.0.0.0 --port 8787 --workers 1 --no-optimize --no-cache \
+  --openai-api-url http://127.0.0.1:20128/v1 \
+  --anthropic-api-url http://127.0.0.1:20128/v1 \
+  --cloudcode-api-url http://127.0.0.1:20128/v1 &
+
+# Compression (litellm backend → 9router)
+OPENAI_API_KEY=sk-n...figurable \
+OPENAI_API_BASE=http://127.0.0.1:20128/v1 \
+headroom proxy --host 0.0.0.0 --port 8787 --workers 1 \
+  --backend litellm-openai \
   --openai-api-url http://127.0.0.1:20128/v1 \
   --anthropic-api-url http://127.0.0.1:20128/v1 \
   --cloudcode-api-url http://127.0.0.1:20128/v1 &

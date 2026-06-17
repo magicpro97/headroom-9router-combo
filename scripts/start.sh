@@ -58,10 +58,27 @@ start_host_process() {
     return 0
   fi
 
-  headroom proxy --host 0.0.0.0 --port 8787 --workers 1 --no-optimize --no-cache \
-    --openai-api-url "${ROUTER}/v1" \
-    --anthropic-api-url "${ROUTER}/v1" \
-    --cloudcode-api-url "${ROUTER}/v1" \
+  # COMPRESSION_MODE: passthrough (default) vs learn (compression on)
+  # - passthrough: --no-optimize (no extra LLM calls, free, no token savings)
+  # - learn: --backend litellm-openai (litellm + 9router, opportunistic compression)
+  #   Tokens saved on tool outputs, Read results, repeated content. Adds latency
+  #   for compression calls (each call is 1 extra 9router request).
+  local headroom_args=(
+    --host 0.0.0.0 --port 8787 --workers 1
+    --openai-api-url "${ROUTER}/v1"
+    --anthropic-api-url "${ROUTER}/v1"
+    --cloudcode-api-url "${ROUTER}/v1"
+  )
+  if [ "${COMPRESSION_MODE:-passthrough}" = "learn" ]; then
+    headroom_args+=(--backend litellm-openai)
+    # 9router doesn't validate the key; any non-empty string works
+    export OPENAI_API_KEY="${OPENAI_API_KEY:-sk-n...figurable}"
+    export OPENAI_API_BASE="${ROUTER}/v1"
+  else
+    headroom_args+=(--no-optimize --no-cache)
+  fi
+
+  headroom proxy "${headroom_args[@]}" \
     > /tmp/headroom-combo.log 2>&1 &
   echo "Started headroom (pid $!), log: /tmp/headroom-combo.log"
 }
