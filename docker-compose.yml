@@ -1,0 +1,91 @@
+name: headroom-9router-combo
+
+# ──────────────────────────────────────────────────────────────────────────
+# headroom (LLM context compression proxy)  →  9router (multi-provider router)
+# ──────────────────────────────────────────────────────────────────────────
+# Headroom listens on host port 8787, forwards to 9router (host port 20128).
+# 9router runs on the HOST (not in docker) — see docs/WHY-NO-DOCKER-9ROUTER.md.
+# 9router must be already running and listening on 0.0.0.0:20128.
+#
+# ─── IMPORTANT: 9router auth on remote requests ──────────────────────────
+# 9router returns 401 "API key required for remote API access" when it
+# receives a request from a non-loopback IP. Docker's bridge network gives
+# the container a 172.x IP that 9router sees as "remote".
+#
+# Two options to fix:
+#   (A) bridge network + API key in headroom env (OPENAI_API_KEY, etc.)
+#       requires you to have set ROUTER_API_KEY in 9router's environment
+#   (B) network_mode: host so headroom shares the host's loopback interface
+#       and 9router sees it as a local request
+#
+# Default profile uses (A). Switch to (B) by setting COMPOSE_PROFILES=host
+# or commenting in the `network_mode: host` line in the host profile.
+# ──────────────────────────────────────────────────────────────────────────
+
+x-headroom-base: &headroom-base
+  image: ghcr.io/chopratejas/headroom:latest
+  container_name: headroom-combo
+  restart: unless-stopped
+  environment:
+    - HEADROOM_HOST=0.0.0.0
+    - HEADROOM_PORT=8787
+    - HEADROOM_NO_OPTIMIZE=1
+    - HEADROOM_NO_CACHE=1
+    - HEADROOM_NO_TELEMETRY=off
+    - OPENAI_TARGET_API_URL=${NINE_ROUTER_BASE:-http://127.0.0.1:20128}/v1
+    - ANTHROPIC_TARGET_API_URL=${NINE_ROUTER_BASE:-http://127.0.0.1:20128}/v1
+    - CLOUDCODE_TARGET_API_URL=${NINE_ROUTER_BASE:-http://127.0.0.1:20128}/v1
+  healthcheck:
+    test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8787/livez | grep -q healthy"]
+    interval: 15s
+    timeout: 5s
+    retries: 5
+    start_period: 20s
+
+services:
+  # ── Default: bridge network + 9router API key ──────────────────────────
+  # Set ROUTER_API_KEY env var in your shell (or .env) and uncomment the
+  # OPENAI_API_KEY / ANTHROPIC_API_KEY / CLOUDCODE_API_KEY lines below.
+  headroom:
+    <<: *headroom-base
+    profiles: ["default", "bridge"]
+    ports:
+      - "8787:8787"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Uncomment these if your 9router requires a key (ROUTER_API_KEY set
+    # in the 9router env). Same value for all three:
+    # - OPENAI_API_KEY=${ROUTER_API_KEY}
+    # - ANTHROPIC_API_KEY=${ROUTER_API_KEY}
+    # - CLOUDCODE_API_KEY=${ROUTER_API_KEY}
+
+  # ── Alternative: host network (no auth needed, but loses isolation) ────
+  # On macOS / Linux, this puts headroom on the same loopback as 9router,
+  # so 9router sees the source IP as local and allows unauthenticated calls.
+  # Use this profile with: COMPOSE_PROFILES=host docker compose up -d
+  headroom-host:
+    <<: *headroom-base
+    container_name: headroom-combo
+    profiles: ["host"]
+    network_mode: host
+    # Override env to use 127.0.0.1 instead of host.docker.internal, since
+    # the container now shares the host's network namespace.
+    environment:
+      - HEADROOM_HOST=0.0.0.0
+      - HEADROOM_PORT=8787
+      - HEADROOM_NO_OPTIMIZE=1
+      - HEADROOM_NO_CACHE=1
+      - HEADROOM_NO_TELEMETRY=off
+      - OPENAI_TARGET_API_URL=http://127.0.0.1:20128/v1
+      - ANTHROPIC_TARGET_API_URL=http://127.0.0.1:20128/v1
+      - CLOUDCODE_TARGET_API_URL=http://127.0.0.1:20128/v1
+    # No ports: section needed — host networking means the container binds
+    # directly on the host's port 8787. port 8787 on the host now serves
+    # headroom; if something else is on 8787, stop it first.
+    # No healthcheck network needed.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8787/livez | grep -q healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s

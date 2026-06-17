@@ -1,0 +1,15 @@
+# .env (local override) — never commit
+
+# OS / IDE noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Test artefacts
+/tmp/
+*.log
+.env
+.env.local
+.env.production
