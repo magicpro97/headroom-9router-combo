@@ -82,12 +82,18 @@ headroom proxy --host 0.0.0.0 --port 8787 --workers 1 \
 
 ### One-time setup for full features
 
-The default `--code-aware` requires tree-sitter (~2 MB). Memory uses
-headroom's built-in SQLite (per-project, no qdrant needed).
+The default `--code-aware` requires tree-sitter (~2 MB). `--memory` with
+semantic search requires hnswlib + sentence-transformers + torch
+(~2 GB disk, ~1.5 GB RSS at startup, ~80 MB model auto-downloaded).
 
 ```bash
-pip3 install --user 'headroom-ai[code]'
+pip3 install --user 'headroom-ai[code,memory]'
 ```
+
+**Memory with semantic search** is what you want when you have many
+projects and want to retrieve relevant context across them. Without
+the `[memory]` extra, headroom falls back to exact-match search via
+sqlite-vec — still works, just less "smart" at scale.
 
 **Linux** (docker compose, host network profile):
 

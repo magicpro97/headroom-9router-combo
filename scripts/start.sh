@@ -44,9 +44,20 @@ echo "9router reachable ✓"
 start_host_process() {
   if ! command -v headroom >/dev/null 2>&1; then
     echo "headroom not installed. Installing via pip..."
-    pip3 install --user 'headroom-ai[proxy]'
+    pip3 install --user 'headroom-ai[code,memory]'
     # PATH may not be set in subshells
     export PATH="$HOME/Library/Python/3.12/bin:$PATH"
+  else
+    # Already installed, but check that [code] + [memory] extras are present
+    if ! python3 -c "import tree_sitter_language_pack" 2>/dev/null; then
+      echo "Installing [code] extra (tree-sitter)..."
+      pip3 install --user 'headroom-ai[code]'
+    fi
+    if ! python3 -c "import hnswlib, sentence_transformers" 2>/dev/null; then
+      echo "Installing [memory] extra (hnswlib + sentence-transformers + torch)..."
+      echo "This adds ~2 GB of disk and ~1.5 GB of RSS at startup."
+      pip3 install --user 'headroom-ai[memory]'
+    fi
   fi
   if [ -f /Users/linhn/Library/Python/3.12/bin/headroom ]; then
     export PATH="/Users/linhn/Library/Python/3.12/bin:$PATH"
