@@ -130,7 +130,6 @@ Per-tool recipe in `docs/TOOLS.md`.
 ```
 
 ---
-
 ## Files
 
 ```
@@ -138,6 +137,7 @@ docker-compose.yml         headroom service definition
 .env.example               9router URL template
 docs/ARCHITECTURE.md       packet flow + per-hop responsibilities
 docs/TOOLS.md              per-tool env vars and config snippets
+docs/9ROUTER-SETUP.md      what to configure in 9router for the combo
 docs/WHY-NO-DOCKER-9ROUTER.md  why 9router runs on the host, not in docker
 scripts/start.sh           docker compose up -d + wait-for-healthy
 scripts/stop.sh            docker compose down
