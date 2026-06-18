@@ -74,6 +74,12 @@ start_host_process() {
   )
   if [ "${COMPRESSION_MODE:-learn}" = "learn" ]; then
     headroom_args+=(--backend litellm-openai --learn)
+    if [ "${CODE_AWARE:-1}" = "1" ]; then
+      headroom_args+=(--code-aware)
+    fi
+    if [ "${MEMORY:-1}" = "1" ]; then
+      headroom_args+=(--memory)
+    fi
     # 9router doesn't validate the key; any non-empty string works
     export OPENAI_API_KEY="${OP...figurable}"
     export OPENAI_API_BASE="${ROUTER}/v1"

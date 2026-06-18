@@ -50,30 +50,43 @@ Both run on `localhost`. The tool only sees one URL: `http://localhost:8787`.
 **macOS** (recommended — host process):
 
 ```bash
-# All features (default) — litellm + 9router, --learn, cache, rate-limit, telemetry
+# All features (default) — litellm + 9router, --learn, --code-aware, --memory, cache, rate-limit, telemetry
 ~/work/headroom-9router-combo/scripts/start.sh
 
 # Passthrough (no extra LLM calls, no token savings, no cache)
 COMPRESSION_MODE=passthrough ~/work/headroom-9router-combo/scripts/start.sh
+
+# Disable code-aware or memory individually
+CODE_AWARE=0 ~/work/headroom-9router-combo/scripts/start.sh
+MEMORY=0 ~/work/headroom-9router-combo/scripts/start.sh
 ```
 
 Manual equivalent:
 
 ```bash
-# All features (default)
+# All features (default — needs `pip install 'headroom-ai[code]'` for tree-sitter)
 headroom proxy --host 0.0.0.0 --port 8787 --workers 1 \
-  --backend litellm-openai --learn \
+  --backend litellm-openai --learn --code-aware --memory \
   --openai-api-url http://127.0.0.1:20128/v1 \
   --anthropic-api-url http://127.0.0.1:20128/v1 \
   --cloudcode-api-url http://127.0.0.1:20128/v1 &
 curl -s http://localhost:8787/livez | jq
 
-# Passthrough (no compression, no cache, no rate limit)
+# Passthrough (no compression, no cache, no rate limit, no code-aware, no memory)
 headroom proxy --host 0.0.0.0 --port 8787 --workers 1 \
   --no-optimize --no-cache --no-rate-limit \
   --openai-api-url http://127.0.0.1:20128/v1 \
   --anthropic-api-url http://127.0.0.1:20128/v1 \
   --cloudcode-api-url http://127.0.0.1:20128/v1 &
+```
+
+### One-time setup for full features
+
+The default `--code-aware` requires tree-sitter (~2 MB). Memory uses
+headroom's built-in SQLite (per-project, no qdrant needed).
+
+```bash
+pip3 install --user 'headroom-ai[code]'
 ```
 
 **Linux** (docker compose, host network profile):
