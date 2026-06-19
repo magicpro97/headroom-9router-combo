@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string><ORG>.sts-refresh</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string><COMBO_DIR>/launchd/sts-refresh.sh</string>
+    </array>
+    <!-- Run at load + every 45 min. STS session is 1h; 45m gives a 15m margin. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StartInterval</key>
+    <integer>2700</integer>
+    <key>KeepAlive</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>/tmp/sts-refresh.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/sts-refresh.err.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+</dict>
+</plist>

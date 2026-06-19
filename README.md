@@ -30,8 +30,9 @@ Both run on `localhost`. The tool only sees one URL: `http://localhost:8787`.
 - **headroom** is the only thing in this repo. 9router is treated as a host
   dependency — see `docs/WHY-NO-DOCKER-9ROUTER.md`.
 - Headroom forwards every request to 9router. Compression is **off** by default
-  in this combo (passthrough). Flip `HEADROOM_NO_OPTIMIZE=0` once you wire your
-  own provider keys into headroom's auth path.
+  in the Quick-Start passthrough recipe; the macOS launchd production setup
+  below runs it **on** (`--mode token --code-aware`). See "Compression: when it
+  actually fires".
 - 9router resolves combo names (e.g. `cheap` → `trt/MiniMax-M3+tr/MiniMax-M3`)
   and model aliases on the upstream side. Headroom is protocol-agnostic.
 
@@ -130,6 +131,112 @@ Per-tool recipe in `docs/TOOLS.md`.
 ```
 
 ---
+
+## Production setup (macOS, launchd, verified 2026-06-19)
+
+The Quick Start runs headroom as a foreground/`&` host process — it dies on
+logout or reboot. For a always-on setup, register the services with `launchd`
+so they auto-start at boot and auto-restart on crash. This is the layout
+running in production:
+
+```
+┌──────────────┐
+│ Claude Code  │  ANTHROPIC_BASE_URL=http://127.0.0.1:8787
+│ Codex /      │  OPENAI_BASE_URL=http://127.0.0.1:8787/v1
+│ OpenCode     │
+└──────┬───────┘
+       ▼
+┌──────────────────────────┐  com.<org>.headroom-front  (KeepAlive)
+│ headroom FRONT  :8787    │  --backend anthropic --mode token --code-aware
+│ compression + AST        │  --openai-api-url http://127.0.0.1:20128/v1
+└──────┬───────────────────┘  --anthropic-api-url http://127.0.0.1:20128/v1
+       ▼
+┌──────────────────────────┐  host process (its own launchd / autostart)
+│ 9router         :20128   │  aliases · combos · provider OAuth
+└──┬────────┬─────────┬────┘
+   │ gh/*   │ tr/*    │ hr/* · sonnet · haiku · bedrock-combo
+   │copilot │tokenrtr │        ▼
+   ▼        ▼         ┌──────────────────────────┐  com.<org>.headroom-bedrock (KeepAlive)
+ OAuth   tokenrouter  │ headroom BEDROCK  :8789  │  --backend bedrock
+                      │ STS auto-refresh bridge  │  --bedrock-client-hook bedrock_refresh:make_client
+                      └──────┬───────────────────┘
+                             ▼
+                      AWS Bedrock Tokyo (ap-northeast-1, jp.anthropic.*)
+```
+
+### Two headroom instances, different jobs
+
+| Port | Role | Backend | Who hits it |
+|------|------|---------|-------------|
+| **8787** | front door / compression gateway | `anthropic` (+ `--openai-api-url`/`--anthropic-api-url` → 9router) | every tool you point at the combo |
+| **8789** | Bedrock STS bridge | `bedrock` + `--bedrock-client-hook` | 9router, only for `hr/*` / `sonnet` / `haiku` / `bedrock-combo` |
+
+Copilot (`gh/*`) and TokenRouter (`tr/*`) traverse headroom **once** (8787).
+Bedrock models traverse it **twice** (8787 compress-front, 8789 STS-bridge) —
+8789 exists only because 9router cannot auto-refresh STS itself. The
+`--bedrock-client-hook` is the upstream PR
+[chopratejas/headroom#1104](https://github.com/chopratejas/headroom/pull/1104).
+
+### STS auto-refresh is two parts, not one
+
+A static STS profile (no SSO / `credential_process`) expires every 1 h. The
+8789 hook's `RefreshableCredentials` can only re-read `~/.aws/credentials` —
+which itself dies in 1 h. So you ALSO need a periodic job that re-mints creds
+(e.g. an ADFS→STS CLI on a 45-min `StartInterval`). KeepAlive on the proxy is
+**not** enough on its own.
+
+| launchd label | role | KeepAlive |
+|---------------|------|-----------|
+| `com.<org>.sts-refresh` | re-mint STS into `~/.aws/credentials` every 45 min | false (one-shot) |
+| `com.<org>.headroom-bedrock` | port 8789, `--backend bedrock` + hook | true |
+| `com.<org>.headroom-front` | port 8787, `--backend anthropic` → 9router | true |
+
+Wrapper scripts + plist templates: see `launchd/` (copy, set your paths, then
+`launchctl load -w ~/Library/LaunchAgents/com.<org>.<svc>.plist`).
+
+### ⚠️ Self-host hazard — never route a self-hosted agent through a port it administers
+
+If the agent that manages these services also uses the combo for its OWN LLM
+calls (e.g. Hermes with `model.base_url=http://127.0.0.1:8787`), then killing/
+restarting 8787 to reconfigure it **severs that agent's own live connection
+mid-task**. Keep the managing agent's lifeline on a port it will not bounce
+(9router `:20128` direct), and use 8787 only for the *other* tools (Claude
+Code, Codex). Before any `kill`/`launchctl` on a proxy port, check what your
+agent's base URL points at first.
+
+### Compression: when it actually fires
+
+`--mode token --code-aware` is real compression (not passthrough), but it only
+kicks in on **agent workloads** — many tool outputs, file reads, logs, long
+conversation history. A single one-shot prompt shows `requests_compressed: 0`
+(nothing compressible). Verified on a real Claude Code session: 21 requests →
+14 compressed, 162 K tokens seen, ~7 K removed. Code-search / log-heavy flows
+hit the headline 47-92 %; lock-file / plain-prose reads compress far less.
+Check `curl -s http://127.0.0.1:8787/stats | jq .summary.compression`.
+
+### Claude Code → Bedrock through the combo
+
+```json
+// ~/.claude/settings.json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8787",
+    "ANTHROPIC_AUTH_TOKEN": "sk_9router",
+    "ANTHROPIC_MODEL": "sonnet",
+    "ANTHROPIC_SMALL_FAST_MODEL": "haiku"
+  }
+}
+```
+
+- Do **NOT** set `CLAUDE_CODE_USE_BEDROCK=1` — it makes Claude Code call the AWS
+  SDK directly and bypasses headroom + 9router entirely.
+- Do **NOT** set `AWS_*` here — STS is handled by the 8789 bridge, Claude Code
+  never touches AWS.
+- `sonnet` → `jp.anthropic.claude-sonnet-4-6`, `haiku` → `jp.anthropic.claude-haiku-4-5`.
+- Opus is policy-blocked on this Bedrock account; use Copilot `gh/claude-opus-4.8`
+  via 9router for Opus instead.
+
+---
 ## Files
 
 ```
@@ -142,6 +249,7 @@ docs/WHY-NO-DOCKER-9ROUTER.md  why 9router runs on the host, not in docker
 scripts/start.sh           docker compose up -d + wait-for-healthy
 scripts/stop.sh            docker compose down
 scripts/test-e2e.sh        smoke-test all 4 tools
+launchd/                   macOS always-on templates (front + bedrock-bridge + sts-refresh)
 ```
 
 ---
