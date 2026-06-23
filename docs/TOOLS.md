@@ -9,8 +9,14 @@ If your tool already pointed at 9router, you change one URL:
 | `localhost:20128` (9router) | `localhost:8787` (headroom, in front of 9router) |
 | model: upstream name (`claude-sonnet-4`, `gpt-5`, ...) | model: combo name (`cheap`, `default`, whatever you set in 9router) |
 
-That's it. 9router stays running on `:20128`; headroom just sits in
-front and compresses. The tool only sees `:8787`.
+That's it for **codex, opencode, copilot**. 9router stays running on `:20128`;
+headroom sits in front and compresses. Those tools only see `:8787`.
+
+> **Claude Code exception**: Claude Code uses native Anthropic Messages with
+> assistant-prefill. Routing through headroom `:8787` (which uses the `hr/`
+> litellm path) causes silent failures (HTTP 200 empty body). Claude Code must
+> point **directly** at 9router `:20128/v1` using the `hc/` anthropic-native
+> node. See the `claude-code` section below.
 
 > **Note about Copilot**: as of 1.0.63, GitHub Copilot CLI does not
 > support a custom base URL or BYOK provider config. The only path
@@ -70,16 +76,31 @@ codex exec --model cheap "Reply with just: hi"
 
 ## claude-code (Anthropic CLI)
 
-**Env:**
-```bash
-export ANTHROPIC_BASE_URL=http://localhost:8787
-export ANTHROPIC_API_KEY=*** export ANTHROPIC_MODEL=cheap
+Claude Code uses native Anthropic Messages with assistant-prefill. Route via
+the `hc/` node (anthropic-compatible, no litellm) — **not** through headroom
+`:8787` which uses `hr/`/litellm and breaks prefill (HTTP 200 empty body).
+
+**`~/.claude/settings.json`:**
+```jsonc
+{
+  "env": {
+    "ANTHROPIC_BASE_URL":                 "http://127.0.0.1:20128/v1",
+    "ANTHROPIC_AUTH_TOKEN":               "sk_9router",
+    "ANTHROPIC_MODEL":                    "hc/jp.anthropic.claude-sonnet-4-6",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL":     "hc/jp.anthropic.claude-sonnet-4-6",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL":      "hc/jp.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL":       "hc/jp.anthropic.claude-sonnet-4-6"
+  }
+}
 ```
 
 **Test:**
 ```bash
-claude -p "Reply with just: hi" --model cheap
+claude -p "Reply with just: hi"
 ```
+
+See `docs/9ROUTER-SETUP.md` → "Claude Code: native Anthropic node (`hc/`)" for
+the full setup and troubleshooting.
 
 ---
 

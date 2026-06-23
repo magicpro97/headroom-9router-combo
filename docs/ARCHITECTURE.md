@@ -40,7 +40,8 @@ upstream
 ### 9router
 - **In**: model name string + auth header
 - **Out**: provider-specific request, possibly translated across protocols
-  (OpenAI Chat ↔ Anthropic Messages)
+  (OpenAI Chat ↔ Anthropic Messages) — or passed through unchanged when the
+  node's `apiType` is `None` (Anthropic-native path)
 - **What it does here**:
   - Expand combo name `cheap` → `[trt/MiniMax-M3, tr/MiniMax-M3]` and pick
     the first healthy one
@@ -48,6 +49,22 @@ upstream
     if the upstream only supports OpenAI
   - Apply `ROUTER_API_KEY` if set
 - **Why not also in docker**: see `WHY-NO-DOCKER-9ROUTER.md`.
+
+#### Two Bedrock-facing nodes (both target headroom :8789)
+
+| Prefix | Node name     | `apiType`          | Protocol path                                           | For                                   |
+|--------|---------------|--------------------|---------------------------------------------------------|---------------------------------------|
+| `hr/`  | Headroom      | `chat_completions` | OpenAI Chat Completions → **litellm** convert → Bedrock | codex, opencode, OpenAI-style clients |
+| `hc/`  | HeadromClaude | `None`             | Anthropic Messages → **direct passthrough** → Bedrock   | **Claude Code** (native Anthropic)    |
+
+`hr/` routes through litellm's OpenAI↔Anthropic conversion layer.
+litellm **rejects** requests that end with an assistant message (prefill),
+returning HTTP 200 with an empty/malformed body. Claude Code surfaces this as:
+`API Error: API returned an empty or malformed response (HTTP 200)`.
+
+`hc/` uses `apiType=None` (anthropic-compatible): forwards `/v1/messages`
+natively with no litellm in the path. AWS Bedrock accepts assistant-prefill
+fine — the rejection was litellm's, not Bedrock's. **Claude Code must use `hc/`.**
 
 ## Failure modes
 

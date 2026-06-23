@@ -141,6 +141,84 @@ curl -s -X POST http://localhost:8787/v1/chat/completions \
 | 9router returns 503 for `cheap` after restart | upstream connection cold-start | retry after 5–10 s; the combo auto-recovers |
 | `headroom` returns 502 with "upstream connect error" | 9router not running | `pgrep -f 9router`; restart it |
 
+## Claude Code: native Anthropic node (`hc/`)
+
+Claude Code speaks native Anthropic Messages (`/v1/messages`) and uses
+**assistant-message prefill** internally. The `hr/` node routes through
+litellm which rejects prefill requests — do not point Claude Code at `hr/`.
+
+Use the `hc/` node (apiType=`None`, anthropic-compatible passthrough):
+
+```jsonc
+// ~/.claude/settings.json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:20128/v1",
+    "ANTHROPIC_AUTH_TOKEN": "sk_9router",
+    "ANTHROPIC_MODEL":                    "hc/jp.anthropic.claude-sonnet-4-6",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL":     "hc/jp.anthropic.claude-sonnet-4-6",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL":      "hc/jp.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL":       "hc/jp.anthropic.claude-sonnet-4-6"
+  }
+}
+```
+
+Notes:
+- `ANTHROPIC_BASE_URL` points directly at 9router `:20128/v1` — **not** at
+  headroom `:8787`. Claude Code goes `9router → headroom :8789 → Bedrock`.
+  (Headroom `:8787` routes via `hr/` / litellm; that path breaks prefill.)
+- `ANTHROPIC_DEFAULT_OPUS_MODEL` falls back to Sonnet — Opus is IAM-blocked on
+  this Bedrock account.
+- Do **not** set `CLAUDE_CODE_USE_BEDROCK=1` or any `AWS_*` vars in Claude
+  Code's env — STS is handled by the headroom :8789 bridge.
+
+### Configuring the `hc` node in 9router
+
+1. GUI → **Providers** → New provider → type `anthropic-compatible` → base URL
+   `http://127.0.0.1:8789/v1` → save.
+2. Note the full node id shown in the URL or provider detail (e.g.
+   `anthropic-compatible-<uuid>`).
+3. The provider connection's `provider` field **must equal the full node id**
+   (e.g. `anthropic-compatible-<uuid>`), not a short form. If it doesn't match,
+   9router returns "No active credentials" even with a valid key.
+4. To add or remove connections use the 9router REST API — no restart needed and
+   the in-memory credential cache stays consistent:
+   ```bash
+   # add a connection
+   curl -s -X POST http://127.0.0.1:20128/api/providers \
+     -H "Content-Type: application/json" \
+     -d '{"provider":"anthropic-compatible-<uuid>","apiKey":"sk_9router",...}'
+   # remove a connection
+   curl -s -X DELETE http://127.0.0.1:20128/api/providers/<connection-id>
+   ```
+   Never raw-SQL `DELETE FROM providers` — it corrupts the in-memory credential
+   cache and requires a 9router restart to recover.
+
+## Troubleshooting: empty/malformed HTTP 200 from Claude Code
+
+**Symptom**: Claude Code returns
+`API Error: API returned an empty or malformed response (HTTP 200)`.
+
+**Root cause**: `ANTHROPIC_BASE_URL` is set to headroom `:8787` (or the 9router
+`hr/` node). Those paths route through litellm's OpenAI↔Anthropic conversion.
+litellm rejects requests that end with an assistant message (prefill) — a
+pattern Claude Code uses internally — by returning an HTTP 200 with an empty or
+malformed body. AWS Bedrock itself accepts prefill fine.
+
+**Fix**: Point Claude Code directly at 9router using the `hc/` node:
+
+```jsonc
+"ANTHROPIC_BASE_URL": "http://127.0.0.1:20128/v1",
+"ANTHROPIC_MODEL":    "hc/jp.anthropic.claude-sonnet-4-6"
+```
+
+The `hc/` node (apiType=`None`) is an Anthropic-native passthrough — no
+litellm, no conversion, prefill works.
+
+**Not a fix**: switching to a different litellm version, changing the model
+alias, or adding retry logic. The rejection is structural to litellm's prefill
+handling, not a transient error.
+
 ## Why no 9router in `docker-compose.yml` here
 
 See `WHY-NO-DOCKER-9ROUTER.md`. Short version: 9router's MITM daemon

@@ -114,12 +114,16 @@ docker compose --profile bridge up -d
 
 ### 3. Point your tools at the combo
 
-| Tool          | Env var                          | Value                                  |
-|---------------|----------------------------------|----------------------------------------|
-| codex         | `OPENAI_BASE_URL`                | `http://localhost:8787/v1`             |
-| claude-code   | `ANTHROPIC_BASE_URL`             | `http://localhost:8787`                |
-| opencode      | `~/.config/opencode/opencode.json` (provider) | see `docs/TOOLS.md`            |
-| copilot       | `COPILOT_PROVIDER_BASE_URL`      | `http://localhost:8787/v1`             |
+| Tool          | Env var                          | Value                                  | Notes                   |
+|---------------|----------------------------------|----------------------------------------|-------------------------|
+| codex         | `OPENAI_BASE_URL`                | `http://localhost:8787/v1`             |                         |
+| claude-code   | `ANTHROPIC_BASE_URL`             | `http://127.0.0.1:20128/v1`            | `hc/` node — see below  |
+| opencode      | `~/.config/opencode/opencode.json` (provider) | see `docs/TOOLS.md`   |                         |
+| copilot       | `COPILOT_PROVIDER_BASE_URL`      | `http://localhost:8787/v1`             |                         |
+
+> **Claude Code must bypass headroom `:8787`** — use `http://127.0.0.1:20128/v1`
+> (9router direct) with model prefix `hc/` (Anthropic-native node, no litellm).
+> Routing via `:8787` triggers a litellm prefill bug: HTTP 200 empty body.
 
 Per-tool recipe in `docs/TOOLS.md`.
 
@@ -141,28 +145,41 @@ running in production:
 
 ```
 ┌──────────────┐
-│ Claude Code  │  ANTHROPIC_BASE_URL=http://127.0.0.1:8787
-│ Codex /      │  OPENAI_BASE_URL=http://127.0.0.1:8787/v1
-│ OpenCode     │
-└──────┬───────┘
-       ▼
-┌──────────────────────────┐  com.<org>.headroom-front  (KeepAlive)
-│ headroom FRONT  :8787    │  --backend anthropic --mode token --code-aware
-│ compression + AST        │  --openai-api-url http://127.0.0.1:20128/v1
-└──────┬───────────────────┘  --anthropic-api-url http://127.0.0.1:20128/v1
-       ▼
+│ Claude Code  │  ANTHROPIC_BASE_URL=http://127.0.0.1:20128/v1  ← direct to 9router (hc/ node)
+└──────┬───────┘  ANTHROPIC_MODEL=hc/jp.anthropic.claude-sonnet-4-6
+       │
+       │  (bypasses headroom :8787 — litellm prefill bug)
+       │
+┌──────┴──────────────────────────────────────────────────────────────┐
+│                                                                      │
+│  ┌──────────────┐                                                    │
+│  │ Codex /      │  OPENAI_BASE_URL=http://127.0.0.1:8787/v1         │
+│  │ OpenCode     │                                                    │
+│  └──────┬───────┘                                                    │
+│         ▼                                                            │
+│  ┌──────────────────────────┐  com.<org>.headroom-front  (KeepAlive) │
+│  │ headroom FRONT  :8787    │  --backend anthropic --mode token      │
+│  │ compression + AST        │  --openai-api-url http://127.0.0.1:20128/v1 │
+│  └──────┬───────────────────┘  --anthropic-api-url http://127.0.0.1:20128/v1 │
+│         │                                                            │
+└─────────┼────────────────────────────────────────────────────────────┘
+          ▼
 ┌──────────────────────────┐  host process (its own launchd / autostart)
 │ 9router         :20128   │  aliases · combos · provider OAuth
-└──┬────────┬─────────┬────┘
-   │ gh/*   │ tr/*    │ hr/* · sonnet · haiku · bedrock-combo
-   │copilot │tokenrtr │        ▼
-   ▼        ▼         ┌──────────────────────────┐  com.<org>.headroom-bedrock (KeepAlive)
- OAuth   tokenrouter  │ headroom BEDROCK  :8789  │  --backend bedrock
-                      │ STS auto-refresh bridge  │  --bedrock-client-hook bedrock_refresh:make_client
-                      └──────┬───────────────────┘
-                             ▼
-                      AWS Bedrock Tokyo (ap-northeast-1, jp.anthropic.*)
+└──┬────────┬──────────┬───┘
+   │ gh/*   │ tr/*     │ hr/* · hc/* · sonnet · haiku · bedrock-combo
+   │copilot │tokenrtr  │        ▼
+   ▼        ▼          ┌──────────────────────────┐  com.<org>.headroom-bedrock (KeepAlive)
+ OAuth   tokenrouter   │ headroom BEDROCK  :8789  │  --backend bedrock
+                       │ STS auto-refresh bridge  │  --bedrock-client-hook bedrock_refresh:make_client
+                       └──────┬───────────────────┘
+                              ▼
+                       AWS Bedrock Tokyo (ap-northeast-1, jp.anthropic.*)
 ```
+
+> **`hc/` vs `hr/`**: both nodes point at headroom `:8789`.
+> `hr/` (chat_completions) routes through litellm — breaks Claude Code prefill.
+> `hc/` (apiType=None) is Anthropic-native passthrough — Claude Code uses this.
 
 ### Two headroom instances, different jobs
 
