@@ -65,12 +65,6 @@ assert captured["inner_creds"].refresh_using is mod._refresh_credentials
 print("PASS 1: refreshable creds wired to inner botocore session")
 
 # ---- test 2: mtime+expiry cache short-circuits; expired re-exports --------
-calls = {"n": 0}
-def fake_export(future_exp):
-    calls["n"] += 1
-    return {"access_key": "AKIA", "secret_key": "s", "token": "t",
-            "expiry_time": future_exp}
-
 # reload a clean module so the real _refresh_credentials cache logic runs,
 # but stub only the os/aws boundary it calls.
 spec2 = importlib.util.spec_from_file_location("bedrock_refresh2",

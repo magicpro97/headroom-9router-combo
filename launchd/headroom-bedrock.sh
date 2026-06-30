@@ -16,13 +16,20 @@ mkdir -p "$(dirname "$LOG")"
 export PYTHONPATH="<BEDROCK_REFRESH_PYPATH>:${PYTHONPATH:-}"
 export AWS_PROFILE="<AWS_PROFILE>"
 export AWS_REGION="<AWS_REGION>"
-# Lets bedrock_refresh.py self-heal a missed refresh tick: it runs this only
-# when ~/.aws/credentials is already expired. Safe to leave unset.
+# Optional self-heal: bedrock_refresh.py runs this ONLY when ~/.aws/credentials
+# is already expired. Set it to your STS re-mint command to enable; leave it
+# empty ("") to disable self-heal.
 export STS_REFRESH_CMD="<STS_REFRESH_CMD>"
 
-# Ensure at least one valid STS session before serving (seed the hook).
-# Replace with your own check/refresh commands.
-<STS_REFRESH_CMD> >> "$LOG" 2>&1 || true
+# Best-effort pre-warm of STS before serving. Not a hard gate: the hook also
+# self-seeds in make_client() via _refresh_credentials(), which uses check=True
+# and fails fast if creds genuinely can't be minted. So a failure here is
+# logged but does not block startup (KeepAlive would otherwise thrash). Guarded
+# so an un-substituted placeholder doesn't break the shell.
+if [ -n "$STS_REFRESH_CMD" ] && [ "$STS_REFRESH_CMD" != "<STS_REFRESH_CMD>" ]; then
+  eval "$STS_REFRESH_CMD" >> "$LOG" 2>&1 || \
+    echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] WARN seed STS_REFRESH_CMD failed; hook will self-seed" >> "$LOG"
+fi
 
 echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] starting headroom bedrock :8789" >> "$LOG"
 exec "$BEDROCK_BIN" proxy \

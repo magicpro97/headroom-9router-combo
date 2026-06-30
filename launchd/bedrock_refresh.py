@@ -60,7 +60,10 @@ AWS_PROFILE = os.environ.get("AWS_PROFILE", "default")
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 # Refresh this many seconds before expiry. The export-credentials shell-out is
 # cheap, so a conservative window (vs boto3's stock 900 s) is fine.
-EXPIRY_WINDOW_SECONDS = int(os.environ.get("HEADROOM_BEDROCK_EXPIRY_WINDOW", "300"))
+try:
+    EXPIRY_WINDOW_SECONDS = int(os.environ.get("HEADROOM_BEDROCK_EXPIRY_WINDOW", "300"))
+except ValueError:
+    EXPIRY_WINDOW_SECONDS = 300  # ignore a non-integer override instead of crashing at import
 # Optional: a command that re-mints STS into ~/.aws/credentials (ADFS/SSO/etc).
 # Run only when the credentials file is already expired, so the hook self-heals
 # a missed external refresh tick instead of serving dead creds.
@@ -81,17 +84,20 @@ def _read_expiration_from_credentials_file(profile: str) -> str | None:
     if not os.path.exists(creds_path):
         return None
     in_section = False
-    with open(creds_path) as f:
-        for line in f:
-            stripped = line.strip()
-            if stripped.startswith("[") and stripped.endswith("]"):
-                in_section = stripped == f"[{profile}]"
-                continue
-            if not in_section:
-                continue
-            if "=" in stripped and stripped.lower().startswith("aws_session_expiration"):
-                _, _, v = stripped.partition("=")
-                return v.strip()
+    try:
+        with open(creds_path) as f:
+            for line in f:
+                stripped = line.strip()
+                if stripped.startswith("[") and stripped.endswith("]"):
+                    in_section = stripped == f"[{profile}]"
+                    continue
+                if not in_section:
+                    continue
+                if "=" in stripped and stripped.lower().startswith("aws_session_expiration"):
+                    _, _, v = stripped.partition("=")
+                    return v.strip()
+    except OSError:
+        return None  # unreadable (perms / transient IO) — treat as missing
     return None
 
 
